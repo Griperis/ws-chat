@@ -10,6 +10,7 @@
     <!-- Join Screen -->
     <div id="joinScreen" class="mt-5">
       <h2 class="mb-4 text-center">Join a Chat Room</h2>
+      <div id="statusMessage" class="mb-3 text-center"></div>
       <div class="row justify-content-center">
         <div class="col-md-6">
           <div class="mb-3">
@@ -44,7 +45,15 @@
     </div>
   </div>
   <script>
-    const ws = new WebSocket('ws://localhost:3000');
+    let statusMessages = [];
+    let statusRemoveTimer = null;
+    let ws;
+    try {
+      ws = new WebSocket('wss://ws-chat-novh.onrender.com');
+    } catch (e) {
+      setStatusMessage('Unable to initialize chat connection. Please check the server address or try again later.', 'danger');
+    }
+    const statusMessageDiv = document.getElementById('statusMessage');
     const messagesDiv = document.getElementById('messages');
     const joinScreen = document.getElementById('joinScreen');
     const chatScreen = document.getElementById('chatScreen');
@@ -66,60 +75,91 @@
       return userColors[name];
     }
 
-    ws.onopen = () => {
-      messagesDiv.innerHTML += '<div class="message"><em>Connected to server</em></div>';
-    };
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.info) {
-        if (data.name && data.color) {
-          let infoText;
-          if (data.name === userName && data.info.includes('joined')) {
-            infoText = `<em><strong style='color:#0d6efd'>You</strong> joined room ${currentRoom}</em>`;
-            // Switch to chat screen only if join was successful for current user
-            joinScreen.style.display = 'none';
-            chatScreen.style.display = '';
-          } else if (data.name === userName && data.info.includes('left')) {
-            infoText = `<em><strong style='color:#0d6efd'>You</strong> left room ${currentRoom}</em>`;
-          } else if (data.name === userName) {
-            infoText = `<em><strong style='color:#0d6efd'>You</strong> ${data.info.replace(data.name, '').trim()}</em>`;
+    function setStatusMessage(text, type = 'info') {
+      if (!text) return;
+      const id = Date.now() + Math.random();
+      let colorClass = '';
+      if (type === 'danger') colorClass = 'text-danger';
+      else if (type === 'success') colorClass = 'text-success';
+      else colorClass = 'text-info';
+      const msgHtml = `<div class='${colorClass}' data-status-id='${id}'><span>${text}</span></div>`;
+      statusMessages.push(id);
+      statusMessageDiv.innerHTML += msgHtml;
+      if (statusRemoveTimer) clearTimeout(statusRemoveTimer);
+      if (statusMessages.length > 1) {
+        statusRemoveTimer = setTimeout(() => {
+          const prevId = statusMessages.shift();
+          const prevDiv = statusMessageDiv.querySelector(`[data-status-id='${prevId}']`);
+          if (prevDiv) prevDiv.remove();
+          if (statusMessages.length > 1) {
+            // If more than one left, schedule next removal
+            statusRemoveTimer = setTimeout(arguments.callee, 5000);
           } else {
-            infoText = `<em><strong style='color:${data.color}'>${data.name}</strong> ${data.info.replace(data.name, '').trim()}</em>`;
+            statusRemoveTimer = null;
           }
-          messagesDiv.innerHTML += `<div class="message">${infoText}</div>`;
-        } else {
-          messagesDiv.innerHTML += `<div class="message"><em>${data.info}</em></div>`;
-        }
-      } else if (data.room && data.text) {
-        let nameHtml;
-        if (data.name === userName) {
-          nameHtml = `<strong style='color:#0d6efd'>${data.name}</strong>: `;
-        } else {
-          nameHtml = `<strong style='color:${data.color}'>${data.name}</strong>: `;
-        }
-        let timeHtml = '';
-        if (data.time) {
-          const date = new Date(data.time);
-          const localTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          timeHtml = `<span style='color:#b0b0b0; font-size:0.9em; margin-right:0.5em;'>${localTime}</span>`;
-        }
-        messagesDiv.innerHTML += `<div class="message">${timeHtml}<strong>[${data.room}]</strong> ${nameHtml}${data.text}</div>`;
-      } else if (data.error) {
-        if (data.errorType === 'duplicateName') {
-          const nameInput = document.getElementById('nameInput');
-          nameInput.classList.add('is-invalid');
-          const nameError = document.getElementById('nameError');
-          nameError.textContent = data.error;
-          nameError.style.display = 'block';
-        }
-        messagesDiv.innerHTML += `<div class="message text-danger"><strong>Error:</strong> ${data.error}</div>`;
-        return;
+        }, 5000);
       }
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    };
-    ws.onclose = () => {
-      messagesDiv.innerHTML += '<div class="message"><em>Disconnected from server</em></div>';
-    };
+    }
+
+    if (ws) {
+      ws.onopen = () => {
+        setStatusMessage('Connected to server', 'success');
+      };
+      ws.onerror = () => {
+        setStatusMessage('Unable to connect to chat server. Please check your connection or try again later.', 'danger');
+      };
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.info) {
+          if (data.name && data.color) {
+            let infoText;
+            if (data.name === userName && data.info.includes('joined')) {
+              infoText = `<em><strong style='color:#0d6efd'>You</strong> joined room ${currentRoom}</em>`;
+              // Switch to chat screen only if join was successful for current user
+              joinScreen.style.display = 'none';
+              chatScreen.style.display = '';
+            } else if (data.name === userName && data.info.includes('left')) {
+              infoText = `<em><strong style='color:#0d6efd'>You</strong> left room ${currentRoom}</em>`;
+            } else if (data.name === userName) {
+              infoText = `<em><strong style='color:#0d6efd'>You</strong> ${data.info.replace(data.name, '').trim()}</em>`;
+            } else {
+              infoText = `<em><strong style='color:${data.color}'>${data.name}</strong> ${data.info.replace(data.name, '').trim()}</em>`;
+            }
+            messagesDiv.innerHTML += `<div class="message">${infoText}</div>`;
+          } else {
+            messagesDiv.innerHTML += `<div class="message"><em>${data.info}</em></div>`;
+          }
+        } else if (data.room && data.text) {
+          let nameHtml;
+          if (data.name === userName) {
+            nameHtml = `<strong style='color:#0d6efd'>${data.name}</strong>: `;
+          } else {
+            nameHtml = `<strong style='color:${data.color}'>${data.name}</strong>: `;
+          }
+          let timeHtml = '';
+          if (data.time) {
+            const date = new Date(data.time);
+            const localTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            timeHtml = `<span style='color:#b0b0b0; font-size:0.9em; margin-right:0.5em;'>${localTime}</span>`;
+          }
+          messagesDiv.innerHTML += `<div class="message">${timeHtml}<strong>[${data.room}]</strong> ${nameHtml}${data.text}</div>`;
+        } else if (data.error) {
+          if (data.errorType === 'duplicateName') {
+            const nameInput = document.getElementById('nameInput');
+            nameInput.classList.add('is-invalid');
+            const nameError = document.getElementById('nameError');
+            nameError.textContent = data.error;
+            nameError.style.display = 'block';
+          }
+          messagesDiv.innerHTML += `<div class="message text-danger"><strong>Error:</strong> ${data.error}</div>`;
+          return;
+        }
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      };
+      ws.onclose = () => {
+        setStatusMessage('Disconnected from server', 'danger');
+      };
+    }
 
     function checkJoinButton() {
       const name = document.getElementById('nameInput').value.trim();
