@@ -97,7 +97,13 @@
         } else {
           nameHtml = `<strong style='color:${data.color}'>${data.name}</strong>: `;
         }
-        messagesDiv.innerHTML += `<div class="message"><strong>[${data.room}]</strong> ${nameHtml}${data.text}</div>`;
+        let timeHtml = '';
+        if (data.time) {
+          const date = new Date(data.time);
+          const localTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          timeHtml = `<span style='color:#b0b0b0; font-size:0.9em; margin-right:0.5em;'>${localTime}</span>`;
+        }
+        messagesDiv.innerHTML += `<div class="message">${timeHtml}<strong>[${data.room}]</strong> ${nameHtml}${data.text}</div>`;
       } else if (data.error) {
         if (data.errorType === 'duplicateName') {
           const nameInput = document.getElementById('nameInput');
