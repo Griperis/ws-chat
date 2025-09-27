@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Multi-Room Chat Client</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Join Screen -->
+    <div id="joinScreen" class="mt-5">
+      <h2 class="mb-4 text-center">Join a Chat Room</h2>
+      <div class="row justify-content-center">
+        <div class="col-md-6">
+          <div class="mb-3">
+            <label class="form-label">Name</label>
+            <input type="text" class="form-control" id="nameInput" placeholder="your name" oninput="checkJoinButton();clearNameError();">
+            <div class="invalid-feedback" id="nameError" style="display:none;"></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Room</label>
+            <input type="text" class="form-control" id="roomInput" placeholder="room name" oninput="checkJoinButton();clearRoomError();">
+            <div class="invalid-feedback" id="roomError" style="display:none;"></div>
+          </div>
+          <button class="btn btn-primary w-100" id="joinBtn" onclick="joinRoom()" disabled>Join Room</button>
+        </div>
+      </div>
+    </div>
+    <!-- Chat Screen -->
+    <div id="chatScreen" style="display:none;">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">Room: <span id="currentRoom"></span></h2>
+        <button class="btn btn-outline-danger" onclick="leaveRoom()">Leave Room</button>
+      </div>
+      <div id="messages" class="mb-3"></div>
+      <div class="row mb-3">
+        <div class="col-12">
+          <div class="input-group">
+            <input type="text" class="form-control" id="messageInput" placeholder="type a message" onkeydown="if(event.key==='Enter'){sendMessage();}">
+            <button class="btn btn-success" onclick="sendMessage()">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const ws = new WebSocket('ws://localhost:3000');
+    const messagesDiv = document.getElementById('messages');
+    const joinScreen = document.getElementById('joinScreen');
+    const chatScreen = document.getElementById('chatScreen');
+    const currentRoomSpan = document.getElementById('currentRoom');
+    let currentRoom = '';
+    let userName = '';
+    const userColors = {};
+    const colorClasses = [
+      'user-red', 'user-green', 'user-orange', 'user-purple', 'user-teal', 'user-pink', 'user-yellow', 'user-gray'
+    ];
+
+    function getUserColor(name) {
+      if (name === userName) return 'user-blue';
+      if (!userColors[name]) {
+        // Assign next available color
+        const idx = Object.keys(userColors).length % colorClasses.length;
+        userColors[name] = colorClasses[idx];
+      }
+      return userColors[name];
+    }
+
+    ws.onopen = () => {
+      messagesDiv.innerHTML += '<div class="message"><em>Connected to server</em></div>';
+    };
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.info) {
+        if (data.name && data.color) {
+          let infoText;
+          if (data.name === userName && data.info.includes('joined')) {
+            infoText = `<em><strong style='color:#0d6efd'>You</strong> joined room ${currentRoom}</em>`;
+            // Switch to chat screen only if join was successful for current user
+            joinScreen.style.display = 'none';
+            chatScreen.style.display = '';
+          } else if (data.name === userName && data.info.includes('left')) {
+            infoText = `<em><strong style='color:#0d6efd'>You</strong> left room ${currentRoom}</em>`;
+          } else if (data.name === userName) {
+            infoText = `<em><strong style='color:#0d6efd'>You</strong> ${data.info.replace(data.name, '').trim()}</em>`;
+          } else {
+            infoText = `<em><strong style='color:${data.color}'>${data.name}</strong> ${data.info.replace(data.name, '').trim()}</em>`;
+          }
+          messagesDiv.innerHTML += `<div class="message">${infoText}</div>`;
+        } else {
+          messagesDiv.innerHTML += `<div class="message"><em>${data.info}</em></div>`;
+        }
+      } else if (data.room && data.text) {
+        let nameHtml;
+        if (data.name === userName) {
+          nameHtml = `<strong style='color:#0d6efd'>${data.name}</strong>: `;
+        } else {
+          nameHtml = `<strong style='color:${data.color}'>${data.name}</strong>: `;
+        }
+        messagesDiv.innerHTML += `<div class="message"><strong>[${data.room}]</strong> ${nameHtml}${data.text}</div>`;
+      } else if (data.error) {
+        if (data.errorType === 'duplicateName') {
+          const nameInput = document.getElementById('nameInput');
+          nameInput.classList.add('is-invalid');
+          const nameError = document.getElementById('nameError');
+          nameError.textContent = data.error;
+          nameError.style.display = 'block';
+        }
+        messagesDiv.innerHTML += `<div class="message text-danger"><strong>Error:</strong> ${data.error}</div>`;
+        return;
+      }
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    };
+    ws.onclose = () => {
+      messagesDiv.innerHTML += '<div class="message"><em>Disconnected from server</em></div>';
+    };
+
+    function checkJoinButton() {
+      const name = document.getElementById('nameInput').value.trim();
+      const room = document.getElementById('roomInput').value.trim();
+      document.getElementById('joinBtn').disabled = !(name && room);
+    }
+    function joinRoom() {
+      const room = document.getElementById('roomInput').value.trim();
+      const name = document.getElementById('nameInput').value.trim();
+      if (room && name) {
+        userName = name;
+        currentRoom = room;
+        currentRoomSpan.textContent = room;
+        ws.send(JSON.stringify({ action: 'join', room, name }));
+        messagesDiv.innerHTML = '';
+        // Do NOT switch screens here; wait for server confirmation
+      }
+    }
+    function leaveRoom() {
+      if (currentRoom) {
+        ws.send(JSON.stringify({ action: 'leave', room: currentRoom }));
+        currentRoom = '';
+        currentRoomSpan.textContent = '';
+        joinScreen.style.display = '';
+        chatScreen.style.display = 'none';
+        document.getElementById('messageInput').value = '';
+        messagesDiv.innerHTML = '';
+      }
+    }
+    function sendMessage() {
+      const text = document.getElementById('messageInput').value.trim();
+      if (currentRoom && text) {
+        ws.send(JSON.stringify({ action: 'message', room: currentRoom, text, name: userName }));
+        document.getElementById('messageInput').value = '';
+      }
+    }
+    function clearNameError() {
+      const nameInput = document.getElementById('nameInput');
+      nameInput.classList.remove('is-invalid');
+      const nameError = document.getElementById('nameError');
+      nameError.textContent = '';
+      nameError.style.display = 'none';
+    }
+    function clearRoomError() {
+      const roomInput = document.getElementById('roomInput');
+      roomInput.classList.remove('is-invalid');
+      const roomError = document.getElementById('roomError');
+      roomError.textContent = '';
+      roomError.style.display = 'none';
+    }
+    window.onload = checkJoinButton;
+  </script>
+</body>
+</html>
